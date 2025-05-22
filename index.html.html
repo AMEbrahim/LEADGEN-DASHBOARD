@@ -1,0 +1,160 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Leadgen Dashboard - Auto Status from Template</title>
+    <link rel="stylesheet" type="text/css" href="https://cdn.datatables.net/1.13.4/css/jquery.dataTables.css">
+    <script src="https://code.jquery.com/jquery-3.5.1.js"></script>
+    <script src="https://cdn.datatables.net/1.13.4/js/jquery.dataTables.js"></script>
+    <script src="https://cdn.sheetjs.com/xlsx-0.20.0/package/dist/xlsx.full.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; padding: 20px; }
+        table { width: 100%; margin-top: 20px; }
+        .highlight-referral { background-color: #ffd6d6 !important; }
+        .highlight-conversion-high { background-color: #ffe6b3 !important; }
+        .highlight-conversion-good { background-color: #d6ffd6 !important; }
+        .highlight-row-urgent td { background-color: #ff9999 !important; font-weight: bold; }
+        .kpi { display: inline-block; margin-right: 40px; font-size: 1.2em; }
+    </style>
+</head>
+<body>
+    <h2>📊 Leadgen Dashboard - Auto Status from Template</h2>
+    <input type="file" id="input-excel" accept=".xlsx, .xlsb, .xls" />
+    <br><br>
+
+    <div id="kpis">
+        <span class="kpi" id="total-agents">Total Agents: 0</span>
+        <span class="kpi" id="on-track-count">On Track: 0</span>
+        <span class="kpi" id="not-on-track-count">Not On Track: 0</span>
+        <span class="kpi" id="urgent-attention-count">Needs Urgent Attention: 0</span>
+        <span class="kpi" id="avg-conv-cost">Avg Conversion Cost: R0.00</span>
+    </div>
+
+    <table id="dashboard" class="display">
+        <thead>
+            <tr>
+                <th>Agent Name</th>
+                <th>Number of Referrals</th>
+                <th>Cost of Referrals</th>
+                <th>Number of Conversions</th>
+                <th>Cost of Conversions</th>
+                <th>On Track Status</th>
+            </tr>
+        </thead>
+        <tbody></tbody>
+    </table>
+
+    <script>
+        function toDecimal(value) {
+            let num = parseFloat(value);
+            return isNaN(num) ? '' : num.toFixed(2);
+        }
+
+        function handleFile(e) {
+            const file = e.target.files[0];
+            const reader = new FileReader();
+            reader.onload = function (e) {
+                const data = new Uint8Array(e.target.result);
+                const workbook = XLSX.read(data, { type: 'array' });
+
+                const firstSheetName = workbook.SheetNames[0];
+                const sheet = workbook.Sheets[firstSheetName];
+                const json = XLSX.utils.sheet_to_json(sheet, { header: 1 });
+
+                const headers = json[0].map(h => h?.toString().trim().toLowerCase());
+                const rows = json.slice(1);
+
+                const idx = {
+                    name: headers.indexOf("agent name"),
+                    referrals: headers.indexOf("number of referrals"),
+                    costRef: headers.indexOf("cost of referrals"),
+                    conversions: headers.indexOf("number of conversions"),
+                    costConv: headers.indexOf("cost of conversions")
+                };
+
+                if (Object.values(idx).some(i => i === -1)) {
+                    alert("Missing one or more required columns in the uploaded file.");
+                    return;
+                }
+
+                const tableBody = $('#dashboard tbody');
+                tableBody.empty();
+
+                let totalAgents = 0;
+                let onTrack = 0;
+                let notOnTrack = 0;
+                let urgentCount = 0;
+                let totalConvCost = 0;
+                let convCostCount = 0;
+
+                rows.forEach(row => {
+                    const name = row[idx.name] ?? '';
+                    const referrals = row[idx.referrals] ?? '';
+                    const rawCostRef = parseFloat(row[idx.costRef]);
+                    const costRef = toDecimal(rawCostRef);
+                    const conversions = row[idx.conversions] ?? '';
+                    const rawCostConv = parseFloat(row[idx.costConv]);
+                    const costConv = toDecimal(rawCostConv);
+                    let status = "";
+
+                    let highlightRefClass = '';
+                    let highlightConvClass = '';
+                    let urgentRowClass = '';
+
+                    // Highlighting
+                    if (!isNaN(rawCostRef) && rawCostRef > 28) {
+                        highlightRefClass = "highlight-referral";
+                    }
+
+                    if (!isNaN(rawCostConv)) {
+                        if (rawCostConv > 1000) {
+                            status = "NEEDS URGENT ATTENTION";
+                            urgentRowClass = "highlight-row-urgent";
+                            urgentCount++;
+                        } else if (rawCostConv > 400) {
+                            status = "NOT ON TRACK";
+                            highlightConvClass = "highlight-conversion-high";
+                            notOnTrack++;
+                        } else {
+                            status = "ON TRACK";
+                            highlightConvClass = "highlight-conversion-good";
+                            onTrack++;
+                        }
+                        totalConvCost += rawCostConv;
+                        convCostCount++;
+                    } else {
+                        status = "NOT ON TRACK";
+                        notOnTrack++;
+                    }
+
+                    if (name) {
+                        totalAgents++;
+
+                        tableBody.append(`<tr class="${urgentRowClass}">
+                            <td>${name}</td>
+                            <td>${referrals}</td>
+                            <td class="${highlightRefClass}">${costRef}</td>
+                            <td>${conversions}</td>
+                            <td class="${highlightConvClass}">${costConv}</td>
+                            <td>${status}</td>
+                        </tr>`);
+                    }
+                });
+
+                $('#dashboard').DataTable();
+
+                // Update KPIs
+                document.getElementById("total-agents").textContent = "Total Agents: " + totalAgents;
+                document.getElementById("on-track-count").textContent = "On Track: " + onTrack;
+                document.getElementById("not-on-track-count").textContent = "Not On Track: " + notOnTrack;
+                document.getElementById("urgent-attention-count").textContent = "Needs Urgent Attention: " + urgentCount;
+                const avgCost = convCostCount > 0 ? (totalConvCost / convCostCount).toFixed(2) : "0.00";
+                document.getElementById("avg-conv-cost").textContent = "Avg Conversion Cost: R" + avgCost;
+            };
+            reader.readAsArrayBuffer(file);
+        }
+
+        document.getElementById('input-excel').addEventListener('change', handleFile, false);
+    </script>
+</body>
+</html>
